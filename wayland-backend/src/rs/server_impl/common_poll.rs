@@ -141,6 +141,25 @@ impl<D> InnerBackend<D> {
         Ok(dispatched)
     }
 
+    /// Calls handle_event for every pending event.
+    /// The caller takes ownership of all the events and is responsible for handling them, including creating and destroying objects.
+    pub(crate) fn visit_events_for(
+        &self,
+        client_id: InnerClientId,
+        mut handle_event: impl FnMut(Event),
+    ) -> std::io::Result<usize> {
+        self.dispatch_events_for_internal(
+            &mut (),
+            client_id,
+            |action, _, _| {
+                handle_event(match action {
+                    DispatchAction::Request { object_id, opcode, arguments, is_destructor, created_id, .. } => Event::Request { object_id , opcode , arguments , is_destructor , created_id },
+                    DispatchAction::Bind { object, client, global, .. } => Event::Bind { object, client, global },
+                })
+            },
+        )
+    }
+    
     pub(crate) fn dispatch_events_for(
         &self,
         data: &mut D,
@@ -233,7 +252,7 @@ impl<D> InnerBackend<D> {
 
     /// A relaxed version of event dispatch. It allows any handler,
     /// and any data can be passed into the handler, not just the state.
-    pub(crate) fn dispatch_events_for_internal<T>(
+    fn dispatch_events_for_internal<T>(
         &self,
         data: &mut T,
         client_id: InnerClientId,
@@ -352,4 +371,20 @@ enum DispatchAction<D: 'static> {
         global: InnerGlobalId,
         handler: Arc<dyn GlobalHandler<D>>,
     },
+}
+
+/// A generic event received from a client
+pub enum Event {
+    Request {
+        object_id: InnerObjectId,
+        opcode: u16,
+        arguments: SmallVec<[Argument<ObjectId, OwnedFd>; 4]>,
+        is_destructor: bool,
+        created_id: Option<InnerObjectId>,
+    },
+    Bind {
+        object: InnerObjectId,
+        client: InnerClientId,
+        global: InnerGlobalId,
+    }
 }
