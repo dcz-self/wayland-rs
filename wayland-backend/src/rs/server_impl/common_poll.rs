@@ -146,6 +146,99 @@ impl<D> InnerBackend<D> {
         data: &mut D,
         client_id: InnerClientId,
     ) -> std::io::Result<usize> {
+        self.dispatch_events_for_internal(
+            data,
+            client_id.clone(),
+            |action, handle, data| match action {
+                DispatchAction::Request {
+                    object,
+                    object_id,
+                    opcode,
+                    arguments,
+                    is_destructor,
+                    created_id,
+                } => {
+                    let ret = object.data.user_data.clone().request(
+                        &handle.clone(),
+                        data,
+                        ClientId { id: client_id.clone() },
+                        Message {
+                            sender_id: ObjectId { id: object_id.clone() },
+                            opcode,
+                            args: arguments,
+                        },
+                    );
+                    if is_destructor {
+                        object.data.user_data.clone().destroyed(
+                            &handle.clone(),
+                            data,
+                            ClientId { id: client_id.clone() },
+                            ObjectId { id: object_id.clone() },
+                        );
+                    }
+                    // acquire the lock again and continue
+                    let mut state = self.state.lock().unwrap();
+                    if is_destructor {
+                        if let Ok(client) = state.clients.get_client_mut(client_id.clone()) {
+                            client.send_delete_id(object_id);
+                        }
+                    }
+                    match (created_id, ret) {
+                        (Some(child_id), Some(child_data)) => {
+                            if let Ok(client) = state.clients.get_client_mut(client_id.clone()) {
+                                client
+                                    .map
+                                    .with(child_id.id, |obj| obj.data.user_data = child_data)
+                                    .unwrap();
+                            }
+                        }
+                        (None, None) => {}
+                        (Some(child_id), None) => {
+                            // Allow the callback to not return any data if the client is already dead (typically
+                            // if the callback provoked a protocol error)
+                            if let Ok(client) = state.clients.get_client(client_id.clone()) {
+                                if !client.killed {
+                                    panic!(
+                                        "Callback creating object {child_id} did not provide any object data."
+                                    );
+                                }
+                            }
+                        }
+                        (None, Some(_)) => {
+                            panic!("An object data was returned from a callback not creating any object");
+                        }
+                    }
+                    // dropping the object calls destructors from which users could call into wayland-backend again.
+                    // so lets release and relock the state again, to avoid a deadlock
+                    std::mem::drop(state);
+                    std::mem::drop(object);
+                }
+                DispatchAction::Bind { object, client, global, handler } => {
+                    let child_data = handler.bind(
+                        &handle.clone(),
+                        data,
+                        ClientId { id: client.clone() },
+                        GlobalId { id: global },
+                        ObjectId { id: object.clone() },
+                    );
+                    // acquire the lock again and continue
+                    let mut state = self.state.lock().unwrap();
+                    if let Ok(client) = state.clients.get_client_mut(client.clone()) {
+                        client.map.with(object.id, |obj| obj.data.user_data = child_data).unwrap();
+                    }
+                }
+            },
+        )
+    }
+
+    /// A relaxed version of event dispatch. It allows any handler,
+    /// and any data can be passed into the handler, not just the state.
+    pub(crate) fn dispatch_events_for_internal<T>(
+        &self,
+        data: &mut T,
+        client_id: InnerClientId,
+        mut handle_action: impl FnMut(DispatchAction<D>, &Handle, &mut T),
+    ) -> std::io::Result<usize> {
         let mut dispatched = 0;
         let handle = self.handle();
         let mut state = self.state.lock().unwrap();
@@ -235,90 +328,10 @@ impl<D> InnerBackend<D> {
                     ));
                 }
             };
-            match action {
-                DispatchAction::Request {
-                    object,
-                    object_id,
-                    opcode,
-                    arguments,
-                    is_destructor,
-                    created_id,
-                } => {
-                    // temporarily unlock the state Mutex while this request is dispatched
-                    std::mem::drop(state);
-                    let ret = object.data.user_data.clone().request(
-                        &handle.clone(),
-                        data,
-                        ClientId { id: client_id.clone() },
-                        Message {
-                            sender_id: ObjectId { id: object_id.clone() },
-                            opcode,
-                            args: arguments,
-                        },
-                    );
-                    if is_destructor {
-                        object.data.user_data.clone().destroyed(
-                            &handle.clone(),
-                            data,
-                            ClientId { id: client_id.clone() },
-                            ObjectId { id: object_id.clone() },
-                        );
-                    }
-                    // acquire the lock again and continue
-                    state = self.state.lock().unwrap();
-                    if is_destructor {
-                        if let Ok(client) = state.clients.get_client_mut(client_id.clone()) {
-                            client.send_delete_id(object_id);
-                        }
-                    }
-                    match (created_id, ret) {
-                        (Some(child_id), Some(child_data)) => {
-                            if let Ok(client) = state.clients.get_client_mut(client_id.clone()) {
-                                client
-                                    .map
-                                    .with(child_id.id, |obj| obj.data.user_data = child_data)
-                                    .unwrap();
-                            }
-                        }
-                        (None, None) => {}
-                        (Some(child_id), None) => {
-                            // Allow the callback to not return any data if the client is already dead (typically
-                            // if the callback provoked a protocol error)
-                            if let Ok(client) = state.clients.get_client(client_id.clone()) {
-                                if !client.killed {
-                                    panic!(
-                                        "Callback creating object {child_id} did not provide any object data."
-                                    );
-                                }
-                            }
-                        }
-                        (None, Some(_)) => {
-                            panic!("An object data was returned from a callback not creating any object");
-                        }
-                    }
-                    // dropping the object calls destructors from which users could call into wayland-backend again.
-                    // so lets release and relock the state again, to avoid a deadlock
-                    std::mem::drop(state);
-                    std::mem::drop(object);
-                    state = self.state.lock().unwrap();
-                }
-                DispatchAction::Bind { object, client, global, handler } => {
-                    // temporarily unlock the state Mutex while this request is dispatched
-                    std::mem::drop(state);
-                    let child_data = handler.bind(
-                        &handle.clone(),
-                        data,
-                        ClientId { id: client.clone() },
-                        GlobalId { id: global },
-                        ObjectId { id: object.clone() },
-                    );
-                    // acquire the lock again and continue
-                    state = self.state.lock().unwrap();
-                    if let Ok(client) = state.clients.get_client_mut(client.clone()) {
-                        client.map.with(object.id, |obj| obj.data.user_data = child_data).unwrap();
-                    }
-                }
-            }
+            // temporarily unlock the state Mutex while requests are dispatched
+            std::mem::drop(state);
+            handle_action(action, &handle, data);
+            state = self.state.lock().unwrap();
         }
         Ok(dispatched)
     }
