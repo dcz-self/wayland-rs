@@ -557,6 +557,37 @@ impl<D> Backend<D> {
     /// the system backend will do the same as invoking
     /// [`Backend::dispatch_all_clients()`].
     #[inline]
+    pub fn handle_single_client(
+        &mut self,
+        client_id: ClientId,
+        handle_event: impl FnMut(Event),
+    ) -> std::io::Result<usize> {
+/*                let dhandle = DisplayHandle::from(handle.clone());
+        let client = match Client::from_id(&dhandle, client_id) {
+            Ok(v) => v,
+            Err(_) => {
+                crate::log_error!("Receiving a request from a dead client ?!");
+                return None;
+            }
+        };
+*/
+        self.backend.handle_events_for(client_id.id, handle_event)
+    }
+    
+    /// Dispatches all pending messages from the specified client.
+    ///
+    /// This method will not block if there are no pending messages.
+    ///
+    /// The provided `data` will be provided to the handler of messages received from the client.
+    ///
+    /// For performance reasons, use of this function should be integrated with an event loop, monitoring
+    /// the file descriptor associated with the client and only calling this method when messages are
+    /// available.
+    ///
+    /// **Note:** This functionality is currently only available on the rust backend, invoking this method on
+    /// the system backend will do the same as invoking
+    /// [`Backend::dispatch_all_clients()`].
+    #[inline]
     pub fn dispatch_single_client(
         &mut self,
         data: &mut D,
@@ -606,5 +637,25 @@ impl<D> ObjectData<D> for DumbObjectData {
         _client_id: ClientId,
         _object_id: ObjectId,
     ) {
+    }
+}
+
+
+/// An event received from a client
+#[derive(Debug)]
+pub enum Event {
+    /// A generic request on an object
+    Request {
+        object_id: server_impl::InnerObjectId,
+        opcode: u16,
+        arguments: smallvec::SmallVec<[crate::protocol::Argument<ObjectId, OwnedFd>; 4]>,
+        is_destructor: bool,
+        created_id: Option<server_impl::InnerObjectId>,
+    },
+    /// Bind a global
+    Bind {
+        object: ObjectId,
+        client: server_impl::InnerClientId,
+        global: GlobalId,
     }
 }

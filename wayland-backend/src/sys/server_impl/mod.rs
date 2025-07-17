@@ -393,6 +393,14 @@ impl<D> InnerBackend<D> {
         }
     }
 
+    pub(crate) fn handle_events_for(
+        &self,
+        client_id: InnerClientId,
+        mut handle_event: impl FnMut(Event),
+    ) -> std::io::Result<usize> {
+        unimplemented!("Not sure if this can be implemented in sys")
+    }
+    
     pub fn dispatch_client(
         &mut self,
         data: &mut D,

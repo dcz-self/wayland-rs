@@ -101,7 +101,7 @@ pub use socket::{BindError, ListeningSocket};
 pub mod backend {
     pub use wayland_backend::protocol;
     pub use wayland_backend::server::{
-        Backend, ClientData, ClientId, Credentials, DisconnectReason, GlobalHandler, GlobalId,
+        Backend, ClientData, ClientId, Credentials, DisconnectReason, Event, GlobalHandler, GlobalId,
         Handle, InitError, InvalidId, ObjectData, ObjectId, WeakHandle,
     };
     pub use wayland_backend::smallvec;
