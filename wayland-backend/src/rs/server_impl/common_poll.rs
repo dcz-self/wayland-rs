@@ -153,7 +153,9 @@ impl<D> InnerBackend<D> {
             client_id,
             |action, _, _| {
                 handle_event(match action {
-                    DispatchAction::Request { object_id, opcode, arguments, is_destructor, created_id, .. } => Event::Request { object_id , opcode , arguments , is_destructor , created_id },
+                    DispatchAction::Request { object_id, opcode, arguments, is_destructor, created_id, .. } => Event::Request {
+                        object_id: ObjectId { id: object_id },
+                        opcode , arguments , is_destructor , created_id },
                     DispatchAction::Bind { object, client, global, .. } => Event::Bind {
                         object: ObjectId { id:object },
                         client,
@@ -310,13 +312,10 @@ impl<D> InnerBackend<D> {
                         }
                     };
                     dispatched += 1;
-                    dbg!("interface");
                     if same_interface(object.interface, &WL_DISPLAY_INTERFACE) {
-                        dbg!("display");
                         client.handle_display_request(message, &mut state.registry);
                         continue;
                     } else if same_interface(object.interface, &WL_REGISTRY_INTERFACE) {
-                        dbg!("registry");
                         if let Some((client, global, object, handler)) =
                             client.handle_registry_request(message, &mut state.registry)
                         {
@@ -337,7 +336,7 @@ impl<D> InnerBackend<D> {
                                 Some(args) => args,
                                 None => continue,
                             };
-                        // Return the whole set to invoke the callback while handle is not borrower via client
+                        // Return the whole set to invoke the callback while handle is not borrowed via client
                         DispatchAction::Request {
                             object,
                             object_id,

@@ -646,7 +646,7 @@ impl<D> ObjectData<D> for DumbObjectData {
 pub enum Event {
     /// A generic request on an object
     Request {
-        object_id: server_impl::InnerObjectId,
+        object_id: ObjectId,
         opcode: u16,
         arguments: smallvec::SmallVec<[crate::protocol::Argument<ObjectId, OwnedFd>; 4]>,
         is_destructor: bool,

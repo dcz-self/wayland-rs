@@ -143,6 +143,12 @@ impl<I> New<I> {
     pub fn wrap(id: I) -> New<I> {
         New { id }
     }
+
+    
+    /// Needed for my own initialization
+    pub fn unwrap(self) -> I {
+        self.id
+    }
 }
 
 /// Helper to initialize client-created objects
